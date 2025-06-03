@@ -1,0 +1,60 @@
+# Node/Vite
+node_modules/
+dist/
+.vite/
+.env
+.env.*.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Editor settings
+.vscode/
+.idea/
+*.swp
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.so
+*.egg
+*.egg-info/
+.eggs/
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+pip-wheel-metadata/
+*.log
+
+# Python virtual environments
+.venv/
+venv/
+ENV/
+env/
+
+# Python environment variables
+.env
+.env.*
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Misc
+.DS_Store
+Thumbs.db
