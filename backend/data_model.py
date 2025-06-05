@@ -1,13 +1,11 @@
-from dataclasses import dataclass
-from typing import Optional, Self, Dict
+from typing import Self, Dict
+from tortoise import fields
+from tortoise.models import Model
 from abc import ABC
 import uuid
 import random
 import json
-import csv
-import os
 
-from .config import FASTAPI_SERVER_ADDRESS
 
 FLUX_WORKFLOW = json.load(open("backend/flux_workflow.json"))
 UPSCALE_WORKFLOW = json.load(open("backend/upscale_api.json"))
@@ -30,7 +28,7 @@ class UpscaleSD35(Workflow):
         out["1"]["inputs"]["resolution"] = "16:9"
         out["1"]["inputs"]["orientation"] = "landscape"
         out["1"]["inputs"]["positive"] = entry.prompt_text
-        out["1"]["inputs"]["seed"] = entry.seed
+        out["1"]["inputs"]["seed"] = int(entry.seed)
         out["2"]["inputs"]["image"] = entry.orig_filepath
         return out
 
@@ -44,24 +42,26 @@ class Flux(Workflow):
         out["1"]["inputs"]["resolution"] = "16:9"
         out["1"]["inputs"]["orientation"] = "landscape"
         out["1"]["inputs"]["positive"] = entry.prompt_text
-        out["1"]["inputs"]["seed"] = entry.seed
+        out["1"]["inputs"]["seed"] = int(entry.seed)
         return out
 
 
-@dataclass
-class Entry:
-    id: str = uuid.uuid4().hex
-    prompt_text: str = ""
-    filepath: Optional[str] = None
-    broken: bool = False
-    upscale: str = "none"
-    score_mu: Optional[float] = None
-    score_sigma: Optional[float] = None
-    deleted: bool = False
-    width: Optional[int] = None
-    height: Optional[int] = None
-    seed: Optional[int] = None
-    orig_filepath: Optional[str] = None
+class Entry(Model):
+    id = fields.CharField(pk=True, max_length=64)
+    prompt_text = fields.TextField()
+    filepath = fields.TextField(null=True)
+    broken = fields.BooleanField(default=False)
+    upscale = fields.CharField(max_length=32, default="none")
+    score_mu = fields.FloatField(null=True)
+    score_sigma = fields.FloatField(null=True)
+    deleted = fields.BooleanField(default=False)
+    width = fields.IntField(null=True)
+    height = fields.IntField(null=True)
+    seed = fields.TextField(null=True, max_length=64)
+    orig_filepath = fields.TextField(null=True)
+
+    class Meta:
+        table = "entries"
 
     def copy(self) -> Self:
         entry = Entry()
@@ -71,11 +71,12 @@ class Entry:
         return entry
 
     def delete(self):
-        self.filepath = None
+        self.filepath = None  # TODO: Decide what to do here...
         self.width = None
         self.height = None
         self.score_mu = None
         self.score_sigma = None
+        self.deleted = True
 
     def generate(self) -> tuple[Self, Prompt]:
         if self.upscale == "is_upscale":
@@ -102,31 +103,3 @@ class Entry:
         return entry, prompt
 
 
-def try_float(x):
-    try:
-        return float(x)
-    except ValueError:
-        return 0.0
-
-
-def get_all_entries_tmp():
-    with open("backend/image_db_amended.csv") as f:
-        r = csv.DictReader(f)
-        res = [
-            Entry(
-                id=hex(hash(l.values())),
-                prompt_text=l["prompt"],
-                filepath=f"http://{FASTAPI_SERVER_ADDRESS}/images/{os.path.basename(l['file'])}",
-                upscale=l["upscale"],
-                score_mu=try_float(l["mu"]),
-                score_sigma=try_float(l["sigma"]),
-                width=l["width"],
-                height=l["height"],
-                seed=l["seed"],
-            )
-            for l in r
-        ]
-    res[0].deleted = True
-    res[1].broken = True
-    res[2].filepath = None
-    return res

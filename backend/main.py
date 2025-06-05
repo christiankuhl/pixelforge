@@ -2,18 +2,25 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi import WebSocket, WebSocketDisconnect
+from tortoise.contrib.fastapi import register_tortoise
 from dataclasses import asdict
-import uuid
-import uuid
 import json
 import urllib.request
 import websockets
-from .data_model import get_all_entries_tmp
+from .data_model import Entry
 from .config import *
 
 DATA = None
 
 app = FastAPI()
+
+register_tortoise(
+    app,
+    db_url="sqlite://db.sqlite3",
+    modules={"models": ["backend.data_model"]},  # Assuming your models are in `data_model.py`
+    generate_schemas=True,
+    add_exception_handlers=True,
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -25,40 +32,32 @@ app.add_middleware(
 
 app.mount("/images", StaticFiles(directory="/home/christian/Bilder"), name="images")
 
-def load_data():
-    global DATA
-    if DATA is None:
-        DATA = get_all_entries_tmp()
-    return DATA
-
-# # Example: return all entries (replace with your data later)
 @app.get("/api/entries")
-def get_entries():
-    return [asdict(d) for d in load_data()]
+async def get_entries():
+    entries = await Entry.all()
+    return [entry.__dict__ for entry in entries]
 
-# @app.post("/api/entry/{id}/toggle_broken")
-# def toggle_broken(id: str):
-#     print(f"Switch entry {id}")
-#     return {"status": "ok", "id": id, "action": "toggle_broken"}
+@app.post("/api/entry/{id}/toggle_broken")
+async def toggle_broken(id: str):
+    print(f"Switch entry {id}")
+    entry = await Entry.get(id=id)
+    entry.broken = not entry.broken
+    await entry.save()
+    return {"status": "ok", "id": id, "action": "toggle_broken"}
 
-# @app.post("/api/entry/{id}/generate")
-# def generate(id: str):
-#     # Stub: initiate regeneration logic for this entry
-#     print(f"Generating entry {id}")
-#     return {"status": "ok", "id": id, "action": "regenerate"}
-
-# @app.delete("/api/entry/{id}")
-# def delete_entry(id: str):
-#     # Stub: mark entry as deleted
-#     print(f"Deleting entry {id}")
-#     return {"status": "ok", "id": id, "action": "delete"}
+@app.delete("/api/entry/{id}")
+async def delete_entry(id: str):
+    print(f"Deleting entry {id}")
+    entry = await Entry.get(id=id)
+    entry.delete()
+    await entry.save()
+    return {"status": "ok", "id": id, "action": "delete"}
 
 
 @app.websocket("/ws/generate/{entry_id}")
 async def websocket_generate(ws: WebSocket, entry_id: str):
     await ws.accept()
-    all_entries = {p.id: p for p in load_data()}
-    entry = all_entries[entry_id]
+    entry = await Entry.get(id=entry_id)
     new_entry, prompt = entry.generate()
     try:
         async with websockets.connect("ws://{}/ws?clientId={}".format(COMFY_SERVER_ADDRESS, CLIENT_ID)) as comfy:
@@ -82,6 +81,7 @@ async def websocket_generate(ws: WebSocket, entry_id: str):
         assert len(output_images) == 1
         filepath = f"http://{FASTAPI_SERVER_ADDRESS}/images/{output_images[0]}"
         new_entry.filepath = filepath
+        await new_entry.save()
         await ws.send_json({"type": "result", "data": asdict(new_entry)})
     except WebSocketDisconnect:
         print(f"WebSocket client disconnected: {entry_id}")
@@ -119,18 +119,3 @@ def request_comfy(ws, prompt):
                 output_images.append(image['filename'])
     return output_images
 
-# if __name__ == "__main__":
-    # # ws = websocket.WebSocket()
-    # ws.connect()
-    # prompt = make_prompt(get_entries()[0])
-
-    # images = request_comfy(ws, prompt)
-    # ws.close() # for in case this example is used in an environment where it will be repeatedly called, like in a Gradio app. otherwise, you'll randomly receive connection timeouts
-#Commented out code to display the output images:
-
-# for node_id in images:
-#     for image_data in images[node_id]:
-#         from PIL import Image
-#         import io
-#         image = Image.open(io.BytesIO(image_data))
-#         image.show()

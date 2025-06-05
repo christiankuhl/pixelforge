@@ -86,7 +86,7 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [lightboxOpen, visibleRows.length]);
 
-  const toggleBroken = async (id: string, broken: string) => {
+  const toggleBroken = async (id: string) => {
     try {
       const res = await fetch(`http://127.0.0.1:8000/api/entry/${id}/toggle_broken`, {
         method: 'POST',
@@ -147,9 +147,10 @@ export default function App() {
       if (res.ok) {
         setRows((prevRows) =>
           prevRows.map((row) =>
-            row.id === id ? { ...row, deleted: true } : row
+            row.id === id ? { ...row, deleted: true, filepath: "" } : row
           )
         );
+        updateVisibleRows();
       } else {
         console.error('Failed to delete entry');
       }
@@ -201,7 +202,7 @@ export default function App() {
         return (
           <Box sx={{ display: 'flex', gap: 1 }}>
             <IconButton
-              onClick={() => toggleBroken(id, broken)}
+              onClick={() => toggleBroken(id)}
               title={broken ? 'Mark as OK' : 'Mark as Broken'}
               disabled={deleted || !filepath}
             >
@@ -248,12 +249,20 @@ export default function App() {
             columns={columns}
             getRowId={(row) => row.id}
             checkboxSelection
+            disableRowSelectionOnClick
             onSortModelChange={updateVisibleRows}
             onFilterModelChange={updateVisibleRows}
             onPaginationModelChange={updateVisibleRows}
             onRowSelectionModelChange={(ids) => {
               setSelectedIds(ids);
               updateVisibleRows();
+            }}
+            initialState={{
+              filter: {
+                filterModel: {
+                  items: [{ field: 'deleted', operator: 'equals', value: 'false' }],
+                },
+              },
             }}
           />
         </Box>
