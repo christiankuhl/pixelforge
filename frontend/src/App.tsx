@@ -86,19 +86,76 @@ export default function App() {
     return () => window.removeEventListener('keydown', handler);
   }, [lightboxOpen, visibleRows.length]);
 
-  const toggleBroken = (id: string, broken: string) => {
-    console.log('Mark broken:', id);
-    // TODO: replace with API call or state update
+  const toggleBroken = async (id: string, broken: string) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/entry/${id}/toggle_broken`, {
+        method: 'POST',
+      });
+      if (res.ok) {
+        setRows((prevRows) =>
+          prevRows.map((row) =>
+            row.id === id ? { ...row, broken: !row.broken } : row
+          )
+        );
+      } else {
+        console.error('Failed to toggle broken status');
+      }
+    } catch (err) {
+      console.error('Error toggling broken status:', err);
+    }
   };
 
-  const regenerate = (id: string) => {
-    console.log('Regenerate:', id);
-    // TODO
+  const generate = async (id: string) => {
+    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/generate/${id}`);
+
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type == "error") {
+        console.error("WebSocket error:", message.message);
+        ws.close();
+      } else if (message.type == "result") {
+        console.log("Image generation complete:", message.data);
+        ws.close();
+        const data = message.data;
+        setRows(prev => {
+          // If it's a new entry, append it
+          const existingIndex = prev.findIndex(r => r.id === data.id);
+          if (existingIndex === -1) {
+            return [...prev, data];
+          }
+          // If the entry exists, update it
+          const updated = [...prev];
+          updated[existingIndex] = data;
+          return updated;
+        });
+        updateVisibleRows();
+      } else {
+        console.log("Progress update:", message.message);
+      }
+    };
+
+    ws.onerror = (err) => {
+      console.error("WebSocket failed", err);
+    };
   };
 
-  const deleteEntry = (id: string) => {
-    console.log('Delete:', id);
-    // TODO
+  const deleteEntry = async (id: string) => {
+    try {
+      const res = await fetch(`http://127.0.0.1:8000/api/entry/${id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        setRows((prevRows) =>
+          prevRows.map((row) =>
+            row.id === id ? { ...row, deleted: true } : row
+          )
+        );
+      } else {
+        console.error('Failed to delete entry');
+      }
+    } catch (err) {
+      console.error('Error deleting entry:', err);
+    }
   };
 
   const bulkDelete = () => {
@@ -116,7 +173,7 @@ export default function App() {
           <img
             src={params.value}
             alt=""
-            style={{ width: 50, height: 'auto', cursor: 'pointer' }}
+            style={{ width: 120, height: 'auto', cursor: 'pointer' }}
             onClick={() => openLightbox(params.row.id)}
           />
         ) : (
@@ -150,7 +207,7 @@ export default function App() {
             >
               {broken ? <CheckIcon fontSize="small" /> : <ReportGmailerrorredIcon fontSize="small" />}
             </IconButton>
-            <IconButton onClick={() => regenerate(id)} title="Regenerate">
+            <IconButton onClick={() => generate(id)} title="(Re-)generate">
               <ReplayIcon fontSize="small" />
             </IconButton>
             <IconButton
@@ -200,7 +257,7 @@ export default function App() {
             }}
           />
         </Box>
-        <Dialog open={lightboxOpen} onClose={() => setLightboxOpen(false)}>
+        <Dialog open={lightboxOpen} onClose={() => setLightboxOpen(false)} maxWidth="lg">
           {currentImage && (
             <img
               src={currentImage.filepath}

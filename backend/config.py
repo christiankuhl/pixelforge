@@ -1,0 +1,5 @@
+import uuid
+
+COMFY_SERVER_ADDRESS = "127.0.0.1:8188"
+FASTAPI_SERVER_ADDRESS = "127.0.0.1:8000"
+CLIENT_ID = str(uuid.uuid4())
