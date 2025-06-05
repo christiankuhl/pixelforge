@@ -3,12 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi import WebSocket, WebSocketDisconnect, HTTPException
 from tortoise.contrib.fastapi import register_tortoise
-from dataclasses import asdict
 import json
 import urllib.request
 import websockets
 import trueskill
-import random
 from .data_model import Entry, PairRequest, UpdateRequest
 from .config import *
 
@@ -39,8 +37,12 @@ app.mount("/images", StaticFiles(directory="/home/christian/Bilder"), name="imag
 
 @app.get("/api/entries")
 async def get_entries():
-    entries = await Entry.all()
-    return [entry.__dict__ for entry in entries]
+    result = []
+    for e in await Entry.all():
+        d = e.__dict__
+        d["rank"] = e.rank
+        result.append(d)
+    return result
 
 
 @app.post("/api/entry/{id}/toggle_broken")
@@ -62,10 +64,19 @@ async def delete_entry(id: str):
 
 
 @app.websocket("/ws/generate/{entry_id}")
-async def websocket_generate(ws: WebSocket, entry_id: str):
+async def generate(ws: WebSocket, entry_id: str):
+    return await websocket_generate(ws, entry_id, upscale=False)
+
+
+@app.websocket("/ws/upscale/{entry_id}")
+async def upscale(ws: WebSocket, entry_id: str):
+    return await websocket_generate(ws, entry_id, upscale=True)
+
+
+async def websocket_generate(ws: WebSocket, entry_id: str, upscale: bool):
     await ws.accept()
     entry = await Entry.get(id=entry_id)
-    new_entry, prompt = entry.generate()
+    new_entry, prompt = entry.generate(upscale=upscale)
     try:
         async with websockets.connect(
             "ws://{}/ws?clientId={}".format(COMFY_SERVER_ADDRESS, CLIENT_ID)
@@ -88,10 +99,12 @@ async def websocket_generate(ws: WebSocket, entry_id: str):
                 for image in node_output["images"]:
                     output_images.append(image["filename"])
         assert len(output_images) == 1
-        filepath = f"http://{FASTAPI_SERVER_ADDRESS}/images/{output_images[0]}"
+        filepath = output_images[0]
         new_entry.filepath = filepath
         await new_entry.save()
-        await ws.send_json({"type": "result", "data": asdict(new_entry)})
+        d = new_entry.__dict__
+        d["rank"] = new_entry.rank
+        await ws.send_json({"type": "result", "data": d})
     except WebSocketDisconnect:
         print(f"WebSocket client disconnected: {entry_id}")
     except Exception as e:
@@ -101,15 +114,20 @@ async def websocket_generate(ws: WebSocket, entry_id: str):
 
 @app.post("/api/trueskill/next_pair")
 async def get_next_trueskill_pair(req: PairRequest):
-    print(f"Requesting next pair from IDs: {req.ids}")
-    # TODO: Implement pair selection logic here
-    aid = random.choice(req.ids)
-    while True:
-        bid = random.choice(req.ids)
-        if bid != aid:
-            break
-    a = await Entry.get(id=aid)
-    b = await Entry.get(id=bid)
+    env = trueskill.TrueSkill()
+    entries = {e.id: e for e in await Entry.filter(id__in=req.ids)}
+    ratings = {
+        e.id: trueskill.Rating(mu=e.score_mu, sigma=e.score_sigma)
+        for e in entries.values()
+    }
+    aid = max(ratings.items(), key=lambda p: p[1].sigma)[0]
+    ra = ratings[aid]
+    bid = max(
+        ((id, env.quality_1vs1(ra, r)) for (id, r) in ratings.items() if id != aid),
+        key=lambda p: p[1],
+    )[0]
+    a = entries[aid]
+    b = entries[bid]
     return {"a": a, "b": b}
 
 
@@ -132,7 +150,10 @@ async def update_trueskill_ranking(update: UpdateRequest):
     if update.draw:
         [(new_r1,), (new_r2,)] = env.rate([[r1], [r2]], ranks=[0, 0])
     else:
-        [new_r1, new_r2,] = env.rate_1vs1(r1, r2)
+        [
+            new_r1,
+            new_r2,
+        ] = env.rate_1vs1(r1, r2)
     e1.score_mu = new_r1.mu
     e1.score_sigma = new_r1.sigma
     e2.score_mu = new_r2.mu
@@ -156,23 +177,3 @@ def get_comfy_history(prompt_id):
         "http://{}/history/{}".format(COMFY_SERVER_ADDRESS, prompt_id)
     ) as response:
         return json.loads(response.read())
-
-
-def request_comfy(ws, prompt):
-    prompt_id = queue_prompt(prompt)["prompt_id"]
-    output_images = []
-    while True:
-        out = ws.recv()
-        if isinstance(out, str):
-            message = json.loads(out)
-            if message["type"] == "executing":
-                data = message["data"]
-                if data["node"] is None and data["prompt_id"] == prompt_id:
-                    break
-    history = get_comfy_history(prompt_id)[prompt_id]
-    for node_id in history["outputs"]:
-        node_output = history["outputs"][node_id]
-        if "images" in node_output:
-            for image in node_output["images"]:
-                output_images.append(image["filename"])
-    return output_images

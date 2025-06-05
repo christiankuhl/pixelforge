@@ -3,6 +3,7 @@ from tortoise import fields
 from tortoise.models import Model
 from abc import ABC
 from pydantic import BaseModel
+from .config import COMFY_IMAGE_FOLDER
 import uuid
 import random
 import json
@@ -30,7 +31,7 @@ class UpscaleSD35(Workflow):
         out["1"]["inputs"]["orientation"] = "landscape"
         out["1"]["inputs"]["positive"] = entry.prompt_text
         out["1"]["inputs"]["seed"] = int(entry.seed)
-        out["2"]["inputs"]["image"] = entry.orig_filepath
+        out["2"]["inputs"]["image"] = COMFY_IMAGE_FOLDER + entry.orig_filepath
         return out
 
 
@@ -64,6 +65,13 @@ class Entry(Model):
     class Meta:
         table = "entries"
 
+    @property
+    def rank(self):
+        if self.score_mu is None or self.score_sigma is None:
+            return 0
+        else:
+            return self.score_mu - 3 * self.score_sigma
+
     def copy(self) -> Self:
         entry = Entry()
         entry.id = uuid.uuid4().hex
@@ -79,14 +87,14 @@ class Entry(Model):
         self.score_sigma = None
         self.deleted = True
 
-    def generate(self) -> tuple[Self, Prompt]:
-        if self.upscale == "is_upscale":
+    def generate(self, upscale=False) -> tuple[Self, Prompt]:
+        if self.upscale == "is_upscale" or upscale:
             print("Scaling up...")
             workflow = UpscaleSD35
         else:
             print("Regenerating...")
             workflow = Flux
-        if self.broken or self.deleted or not self.filepath:
+        if (self.broken or self.deleted or not self.filepath) and not upscale:
             print(f"Replacing original... {self}")
             entry = self
             self.score_mu = None
@@ -94,6 +102,9 @@ class Entry(Model):
         else:
             print("Generating new image...")
             entry = self.copy()
+            if upscale:
+                entry.orig_filepath = self.filepath
+                entry.upscale = "is_upscale"
         if not self.deleted or not self.filepath and self.seed:
             print("New seed...")
             entry.seed = random.randint(0, 0x7FFFFFFF)

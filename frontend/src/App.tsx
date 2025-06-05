@@ -23,6 +23,8 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import ReplayIcon from '@mui/icons-material/Replay';
 import CheckIcon from '@mui/icons-material/Check';
 import ReportGmailerrorredIcon from '@mui/icons-material/ReportGmailerrorred';
+import PhotoSizeSelectLargeIcon from '@mui/icons-material/PhotoSizeSelectLarge';
+
 
 interface Entry {
   id: string;
@@ -32,10 +34,12 @@ interface Entry {
   upscale?: string;
   score_mu?: number;
   score_sigma?: number;
+  rank?: number;
   deleted?: boolean;
   width?: number;
   height?: number;
   seed?: number;
+  filepath_orig?: string;
 }
 
 export default function App() {
@@ -114,8 +118,10 @@ export default function App() {
     }
   };
 
-  const generate = async (id: string) => {
-    const ws = new WebSocket(`ws://127.0.0.1:8000/ws/generate/${id}`);
+  const generate = async (id: string, upscale: boolean) => {
+    const endpoint = !upscale ? "generate" : "upscale";
+    const addr = `ws://127.0.0.1:8000/ws/${endpoint}/${id}`;
+    const ws = new WebSocket(addr);
 
     ws.onmessage = (event) => {
       const message = JSON.parse(event.data);
@@ -253,7 +259,7 @@ export default function App() {
       renderCell: (params: GridRenderCellParams) =>
         params.value ? (
           <img
-            src={params.value}
+            src={'http://127.0.0.1:8000/images/' + params.value}
             alt=""
             style={{ width: 120, height: 'auto', cursor: 'pointer' }}
             onClick={() => openLightbox(params.row.id)}
@@ -268,6 +274,7 @@ export default function App() {
     { field: 'deleted', headerName: 'Deleted', width: 100, flex: 0, },
     { field: 'score_mu', headerName: 'μ', width: 100, type: 'number', flex: 0, },
     { field: 'score_sigma', headerName: 'σ', width: 100, type: 'number', flex: 0, },
+    { field: 'rank', headerName: 'rank', width: 100, type: 'number', flex: 0, },
     { field: 'width', headerName: 'Width', width: 100, type: 'number', flex: 0, },
     { field: 'height', headerName: 'Height', width: 100, type: 'number', flex: 0, },
     { field: 'seed', headerName: 'Seed', width: 100, flex: 0, },
@@ -278,7 +285,7 @@ export default function App() {
       filterable: false,
       width: 180,
       renderCell: (params: GridRenderCellParams) => {
-        const { id, broken, deleted, filepath } = params.row;
+        const { id, broken, deleted, filepath, upscale } = params.row;
 
         return (
           <Box sx={{ display: 'flex', gap: 1 }}>
@@ -289,8 +296,15 @@ export default function App() {
             >
               {broken ? <CheckIcon fontSize="small" /> : <ReportGmailerrorredIcon fontSize="small" />}
             </IconButton>
-            <IconButton onClick={() => generate(id)} title="(Re-)generate">
+            <IconButton onClick={() => generate(id, false)} title="(Re-)generate">
               <ReplayIcon fontSize="small" />
+            </IconButton>
+            <IconButton
+              onClick={() => generate(id, true)}
+              title="Upscale"
+              disabled={deleted || !filepath || upscale == "is_upscale"}
+            >
+              <PhotoSizeSelectLargeIcon fontSize="small" />
             </IconButton>
             <IconButton
               onClick={() => deleteEntry(id)}
@@ -384,7 +398,7 @@ export default function App() {
               {currentPair.map((entry, i) => (
                 <img
                   key={entry.id}
-                  src={entry.filepath}
+                  src={'http://127.0.0.1:8000/images/' + entry.filepath}
                   alt={entry.prompt_text}
                   style={{
                     maxWidth: '45vw',
@@ -409,7 +423,7 @@ export default function App() {
                 mt: 2,
               }}
             >
-              <Box sx={{ flex: 1 }} /> {/* Left spacer */}
+              <Box sx={{ flex: 1 }} />
 
               <Box sx={{ flex: 0 }}>
                 <Button variant="outlined" onClick={() => handleRankVote(null)}>
@@ -428,7 +442,7 @@ export default function App() {
           {currentImage && (
             <>
               <img
-                src={currentImage.filepath}
+                src={'http://127.0.0.1:8000/images/' + currentImage.filepath}
                 alt={currentImage.prompt_text}
                 style={{
                   maxWidth: '90vw',
@@ -459,8 +473,15 @@ export default function App() {
                 >
                   {currentImage.broken ? <CheckIcon /> : <ReportGmailerrorredIcon />}
                 </IconButton>
-                <IconButton onClick={() => generate(currentImage.id)} title="(Re-)generate">
+                <IconButton onClick={() => generate(currentImage.id, false)} title="(Re-)generate">
                   <ReplayIcon />
+                </IconButton>
+                <IconButton
+                  onClick={() => generate(currentImage.id, true)}
+                  title="Upscale"
+                  disabled={currentImage.deleted || !currentImage.filepath || currentImage.upscale == "is_upscale"}
+                >
+                  <PhotoSizeSelectLargeIcon fontSize="small" />
                 </IconButton>
                 <IconButton
                   onClick={() => {
