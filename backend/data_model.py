@@ -1,7 +1,8 @@
-from typing import Self, Dict
+from typing import Self, Dict, List, Optional
 from tortoise import fields
 from tortoise.models import Model
 from abc import ABC
+from pydantic import BaseModel
 import uuid
 import random
 import json
@@ -103,3 +104,11 @@ class Entry(Model):
         return entry, prompt
 
 
+class PairRequest(BaseModel):
+    ids: List[str]
+
+
+class UpdateRequest(BaseModel):
+    winner: Optional[str] = None
+    loser: Optional[str] = None
+    draw: Optional[List[str]] = None

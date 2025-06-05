@@ -10,6 +10,8 @@ import type {
 } from '@mui/x-data-grid';
 import {
   Dialog,
+  Menu,
+  MenuItem,
   ThemeProvider,
   CssBaseline,
   createTheme,
@@ -42,7 +44,13 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<(string | number)[]>([]);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState<number>(0);
-
+  const [rankingMode, setRankingMode] = useState(false);
+  const [currentPair, setCurrentPair] = useState<[Entry, Entry] | null>(null);
+  const [rankingPool, setRankingPool] = useState<Entry[]>([]);
+  const [contextMenu, setContextMenu] = useState<{
+    mouseX: number;
+    mouseY: number;
+  } | null>(null);
   const apiRef = useGridApiRef();
 
 
@@ -160,6 +168,78 @@ export default function App() {
     }
   };
 
+  const startRanking = () => {
+    const selected = rows.filter((row) => selectedIds.includes(row.id) && !row.deleted && row.filepath);
+    if (selected.length < 2) {
+      alert("Select at least two entries to compare.");
+      return;
+    }
+    setRankingPool(selected);
+    queueNextPair(selected);
+    setRankingMode(true);
+  };
+
+  const queueNextPair = async (pool = rankingPool) => {
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/trueskill/next_pair', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: pool.map(e => e.id) }),
+      });
+      if (!res.ok) throw new Error("Failed to fetch next pair");
+
+      const data = await res.json();
+      if (!data.a || !data.b) {
+        setRankingMode(false);
+        return;
+      }
+
+      setCurrentPair([data.a, data.b]);
+    } catch (err) {
+      console.error("Next pair error:", err);
+      setRankingMode(false);
+    }
+  };
+
+  const handleRankVote = async (winnerIndex: number | null) => {
+    const [a, b] = currentPair!;
+    let body;
+
+    if (winnerIndex === null) {
+      body = { draw: [a.id, b.id] };
+    } else {
+      const winner = winnerIndex === 0 ? a.id : b.id;
+      const loser = winnerIndex === 0 ? b.id : a.id;
+      body = { winner, loser };
+    }
+
+    try {
+      const res = await fetch('http://127.0.0.1:8000/api/trueskill/update', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+
+      if (!res.ok) throw new Error("Failed to update ranking");
+
+      const updated = await res.json();
+      if (Array.isArray(updated)) {
+        setRows(prev =>
+          prev.map(row =>
+            updated.find(u => u.id === row.id) || row
+          )
+        );
+      }
+
+      queueNextPair();
+    } catch (err) {
+      console.error("Ranking update failed:", err);
+      setRankingMode(false);
+    }
+  };
+
+
+
   const bulkDelete = () => {
     console.log('Bulk delete:', selectedIds);
     // TODO
@@ -236,37 +316,114 @@ export default function App() {
     <ThemeProvider theme={darkTheme}>
       <CssBaseline />
       <Box sx={{ padding: 2 }}>
-        {selectedIds.length > 0 && (
-          <Box sx={{ marginBottom: 2 }}>
-            <Button variant="contained" color="secondary" onClick={bulkDelete}>
-              Delete Selected
-            </Button>
-          </Box>
-        )}
-        <Box sx={{ height: '95vh', width: '98vw' }}>
-          <DataGrid
-            apiRef={apiRef}
-            rows={rows}
-            columns={columns}
-            getRowId={(row) => row.id}
-            checkboxSelection
-            disableRowSelectionOnClick
-            onSortModelChange={updateVisibleRows}
-            onFilterModelChange={updateVisibleRows}
-            onPaginationModelChange={updateVisibleRows}
-            onRowSelectionModelChange={(ids) => {
-              setSelectedIds(ids);
-              updateVisibleRows();
-            }}
-            initialState={{
-              filter: {
-                filterModel: {
-                  items: [{ field: 'deleted', operator: 'equals', value: 'false' }],
+        {!rankingMode || !currentPair ? (
+          <Box sx={{ height: '95vh', width: '98vw' }} onContextMenu={(e) => {
+            e.preventDefault();
+            if (selectedIds.length > 0) {
+              setContextMenu(
+                contextMenu === null
+                  ? {
+                    mouseX: e.clientX + 2,
+                    mouseY: e.clientY - 6,
+                  }
+                  : null
+              );
+            }
+          }}>
+            <DataGrid
+              apiRef={apiRef}
+              rows={rows}
+              columns={columns}
+              getRowId={(row) => row.id}
+              checkboxSelection
+              disableRowSelectionOnClick
+              onSortModelChange={updateVisibleRows}
+              onFilterModelChange={updateVisibleRows}
+              onPaginationModelChange={updateVisibleRows}
+              onRowSelectionModelChange={(ids) => {
+                setSelectedIds(Array.from(ids.ids));
+                updateVisibleRows();
+              }}
+              initialState={{
+                filter: {
+                  filterModel: {
+                    items: [{ field: 'deleted', operator: 'equals', value: 'false' }],
+                  },
                 },
-              },
-            }}
-          />
-        </Box>
+              }}
+            />
+            <Menu
+              open={contextMenu !== null}
+              onClose={() => setContextMenu(null)}
+              anchorReference="anchorPosition"
+              anchorPosition={
+                contextMenu !== null
+                  ? { top: contextMenu.mouseY, left: contextMenu.mouseX }
+                  : undefined
+              }
+            >
+              <MenuItem
+                onClick={() => {
+                  setContextMenu(null);
+                  startRanking();
+                }}
+              >
+                Rank Selected
+              </MenuItem>
+              <MenuItem
+                onClick={() => {
+                  setContextMenu(null);
+                  bulkDelete();
+                }}
+              >
+                Delete Selected
+              </MenuItem>
+            </Menu>
+          </Box>) : (<>
+            <Box sx={{ display: 'flex', justifyContent: 'center', gap: 4, p: 2 }}>
+              {currentPair.map((entry, i) => (
+                <img
+                  key={entry.id}
+                  src={entry.filepath}
+                  alt={entry.prompt_text}
+                  style={{
+                    maxWidth: '45vw',
+                    maxHeight: '80vh',
+                    width: 'auto',
+                    objectFit: 'contain',
+                    cursor: 'pointer',
+                    border: '4px solid transparent',
+                  }}
+                  onClick={() => handleRankVote(i)}
+                />
+              ))}
+            </Box>
+            <Box
+              sx={{
+                display: 'flex',
+                flexDirection: 'row',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                width: '100%',
+                maxWidth: '90vw',
+                mt: 2,
+              }}
+            >
+              <Box sx={{ flex: 1 }} /> {/* Left spacer */}
+
+              <Box sx={{ flex: 0 }}>
+                <Button variant="outlined" onClick={() => handleRankVote(null)}>
+                  Draw
+                </Button>
+              </Box>
+
+              <Box sx={{ flex: 1, display: 'flex', justifyContent: 'flex-end' }}>
+                <Button onClick={() => setRankingMode(false)}>Exit</Button>
+              </Box>
+            </Box>
+          </>
+        )
+        }
         <Dialog open={lightboxOpen} onClose={() => setLightboxOpen(false)} maxWidth="lg">
           {currentImage && (
             <>
