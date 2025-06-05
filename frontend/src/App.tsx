@@ -97,6 +97,7 @@ export default function App() {
             row.id === id ? { ...row, broken: !row.broken } : row
           )
         );
+        updateVisibleRows();
       } else {
         console.error('Failed to toggle broken status');
       }
@@ -268,17 +269,54 @@ export default function App() {
         </Box>
         <Dialog open={lightboxOpen} onClose={() => setLightboxOpen(false)} maxWidth="lg">
           {currentImage && (
-            <img
-              src={currentImage.filepath}
-              alt={currentImage.prompt_text}
-              style={{
-                maxWidth: '90vw',
-                maxHeight: '90vh',
-                objectFit: 'contain',
-                cursor: 'pointer'
-              }}
-              onClick={() => setLightboxOpen(false)}
-            />
+            <>
+              <img
+                src={currentImage.filepath}
+                alt={currentImage.prompt_text}
+                style={{
+                  maxWidth: '90vw',
+                  maxHeight: '90vh',
+                  objectFit: 'contain',
+                  cursor: 'pointer'
+                }}
+                onClick={() => setLightboxOpen(false)}
+              />
+              <Box
+                sx={{
+                  position: 'absolute',
+                  bottom: 16,
+                  right: 16,
+                  display: 'flex',
+                  gap: 1,
+                  backgroundColor: 'rgba(0, 0, 0, 0.5)',
+                  borderRadius: 1,
+                  padding: 1,
+                }}
+
+
+              >
+                <IconButton
+                  onClick={() => toggleBroken(currentImage.id)}
+                  title={currentImage.broken ? 'Mark as OK' : 'Mark as Broken'}
+                  disabled={currentImage.deleted || !currentImage.filepath}
+                >
+                  {currentImage.broken ? <CheckIcon /> : <ReportGmailerrorredIcon />}
+                </IconButton>
+                <IconButton onClick={() => generate(currentImage.id)} title="(Re-)generate">
+                  <ReplayIcon />
+                </IconButton>
+                <IconButton
+                  onClick={() => {
+                    deleteEntry(currentImage.id);
+                    setLightboxIndex((i) => Math.min(i + 1, visibleRows.length - 1));
+                  }}
+                  title="Delete"
+                  disabled={currentImage.deleted}
+                >
+                  <DeleteIcon />
+                </IconButton>
+              </Box>
+            </>
           )}
         </Dialog>
       </Box>
